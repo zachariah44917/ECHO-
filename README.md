@@ -1,1 +1,257 @@
-# ECHO-
+# ECHO-<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECHO - Motion Survival</title>
+<style>
+  html, body {
+    margin: 0;
+    overflow: hidden;
+    background: #050510;
+    color: white;
+    font-family: Arial, sans-serif;
+  }
+
+  canvas {
+    display: block;
+    background: radial-gradient(circle at top, #11152a, #050510);
+  }
+
+  #ui {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 10;
+  }
+
+  #score {
+    font-size: 24px;
+    font-weight: bold;
+  }
+
+  #status {
+    margin-top: 8px;
+    color: #7fdcff;
+  }
+
+  #video {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    width: 160px;
+    height: 120px;
+    border: 2px solid #3a8cff;
+    border-radius: 10px;
+    opacity: 0.9;
+  }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.6);
+    z-index: 20;
+    text-align: center;
+    padding: 24px;
+  }
+
+  #startBtn {
+    margin-top: 16px;
+    padding: 12px 22px;
+    background: #3a8cff;
+    border: none;
+    color: white;
+    font-size: 18px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div id="score">Score: 0</div>
+  <div id="status">Waiting for camera...</div>
+</div>
+
+<div id="overlay">
+  <div>
+    <h1>ECHO</h1>
+    <p>Move your body left and right to dodge the falling echoes.</p>
+    <button id="startBtn">Start Game</button>
+  </div>
+</div>
+
+<video id="video" autoplay playsinline muted></video>
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const video = document.getElementById('video');
+const scoreEl = document.getElementById('score');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+let player = { x: canvas.width / 2, y: canvas.height - 80, r: 18 };
+let obstacles = [];
+let score = 0;
+let speed = 4;
+let running = false;
+
+const motionCanvas = document.createElement('canvas');
+const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+motionCanvas.width = 64;
+motionCanvas.height = 48;
+
+let previousFrame = null;
+
+async function setupCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user' }
+    });
+    video.srcObject = stream;
+    statusEl.textContent = 'Camera ready';
+  } catch (e) {
+    statusEl.textContent = 'Camera access denied';
+  }
+}
+
+function detectMotion() {
+  if (video.readyState < 2) return 0;
+
+  motionCtx.drawImage(video, 0, 0, motionCanvas.width, motionCanvas.height);
+  const frame = motionCtx.getImageData(0, 0, motionCanvas.width, motionCanvas.height);
+
+  if (!previousFrame) {
+    previousFrame = frame;
+    return 0;
+  }
+
+  let left = 0;
+  let right = 0;
+
+  for (let y = 0; y < motionCanvas.height; y++) {
+    for (let x = 0; x < motionCanvas.width; x++) {
+      const i = (y * motionCanvas.width + x) * 4;
+
+      const diff =
+        Math.abs(frame.data[i] - previousFrame.data[i]) +
+        Math.abs(frame.data[i + 1] - previousFrame.data[i + 1]) +
+        Math.abs(frame.data[i + 2] - previousFrame.data[i + 2]);
+
+      if (diff > 40) {
+        if (x < motionCanvas.width / 2) left++;
+        else right++;
+      }
+    }
+  }
+
+  previousFrame = frame;
+
+  return (right - left) / 200;
+}
+
+function spawnObstacle() {
+  obstacles.push({
+    x: Math.random() * canvas.width,
+    y: -20,
+    r: 14 + Math.random() * 10
+  });
+}
+
+function update() {
+  if (!running) return;
+
+  const motion = detectMotion();
+
+  player.x += motion * 25;
+  player.x = Math.max(player.r, Math.min(canvas.width - player.r, player.x));
+
+  if (Math.random() < 0.03) spawnObstacle();
+
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.y += speed;
+
+    const dx = o.x - player.x;
+    const dy = o.y - player.y;
+
+    if (Math.hypot(dx, dy) < o.r + player.r) {
+      running = false;
+      overlay.style.display = 'flex';
+      overlay.querySelector('h1').textContent = 'Game Over';
+      overlay.querySelector('p').textContent =
+        'Final Score: ' + score + '. Move less sharply and anticipate the echoes.';
+      return;
+    }
+
+    if (o.y > canvas.height + 40) obstacles.splice(i, 1);
+  }
+
+  score++;
+  speed = 4 + score / 400;
+  scoreEl.textContent = 'Score: ' + score;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = '#58c7ff';
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (const o of obstacles) {
+    const glow = ctx.createRadialGradient(o.x, o.y, 2, o.x, o.y, o.r * 2);
+    glow.addColorStop(0, '#ff8ae6');
+    glow.addColorStop(1, 'rgba(255,138,230,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(o.x, o.y, o.r * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ff5fd2';
+    ctx.beginPath();
+    ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+startBtn.onclick = async () => {
+  overlay.style.display = 'none';
+  overlay.querySelector('h1').textContent = 'ECHO';
+  overlay.querySelector('p').textContent =
+    'Move your body left and right to dodge the falling echoes.';
+  score = 0;
+  speed = 4;
+  obstacles = [];
+  player.x = canvas.width / 2;
+  previousFrame = null;
+  running = true;
+};
+
+setupCamera();
+loop();
+</script>
+
+</body>
+</html>
