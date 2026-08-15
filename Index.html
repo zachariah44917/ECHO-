@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ECHO 3.0</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#03040a;font-family:Arial,sans-serif}
+canvas{display:block}
+#hud{position:absolute;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;color:#eafcff;font-weight:700;z-index:2}
+#controls{position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:space-between;padding:0 18px;z-index:2}
+.btn{width:84px;height:84px;border-radius:50%;border:2px solid rgba(126,249,255,.7);background:rgba(20,30,50,.45);color:#fff;font-weight:800}
+#intro{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:radial-gradient(circle at center,#0b1630 0%,#03040a 70%);color:white;z-index:3}
+#intro h1{font-size:72px;letter-spacing:10px;margin:0;color:#7ef9ff;text-shadow:0 0 30px #38d9ff}
+#intro p{opacity:.85;margin-top:12px}
+#menu{display:flex;gap:10px;margin-top:18px}
+.skin{padding:10px 14px;border-radius:999px;border:1px solid rgba(126,249,255,.35);cursor:pointer}
+.skin.active{background:#38d9ff;color:#031018}
+#start{margin-top:18px;padding:12px 24px;border:0;border-radius:12px;background:#38d9ff;color:#001018;font-weight:900}
+#bossBanner{position:absolute;top:70px;left:50%;transform:translateX(-50%);padding:8px 14px;border-radius:999px;background:rgba(255,80,120,.18);color:#ffd7e5;border:1px solid rgba(255,120,160,.35);display:none;z-index:2}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+<div>Score <span id="score">0</span></div>
+<div>Best <span id="best">0</span></div>
+<div>Echo <span id="echo">3</span></div>
+</div>
+<div id="bossBanner">BOSS WAVE</div>
+<div id="controls">
+<button class="btn" id="jump">JUMP</button>
+<button class="btn" id="pulse">ECHO</button>
+</div>
+<div id="intro">
+<h1>ECHO</h1>
+<p>Sound reveals what light cannot.</p>
+<div id="menu">
+<div class="skin active" data-skin="cyan">Cyan</div>
+<div class="skin" data-skin="violet">Violet</div>
+<div class="skin" data-skin="gold">Gold</div>
+</div>
+<button id="start">Begin Run</button>
+</div>
+<script>
+const c=document.getElementById('game'),ctx=c.getContext('2d');
+function resize(){c.width=innerWidth;c.height=innerHeight}resize();addEventListener('resize',resize);
+const scoreEl=score=document.getElementById('score');
+const bestEl=document.getElementById('best');
+const echoEl=document.getElementById('echo');
+const intro=document.getElementById('intro');
+const bossBanner=document.getElementById('bossBanner');
+let best=+localStorage.getItem('echo3_best')||0;bestEl.textContent=best;
+
+const skins={cyan:'#7ef9ff',violet:'#b388ff',gold:'#ffd166'};
+let skin='cyan';
+document.querySelectorAll('.skin').forEach(el=>{
+  el.onclick=()=>{document.querySelectorAll('.skin').forEach(s=>s.classList.remove('active'));el.classList.add('active');skin=el.dataset.skin;}
+});
+
+let player,obs,orbs,particles,scoreVal,speed,frame,echoes,pulseTimer,running,boss;
+
+function reset(){
+ player={x:120,y:c.height/2,r:16,vy:0};
+ obs=[];orbs=[];particles=[];
+ scoreVal=0;speed=5;frame=0;echoes=3;pulseTimer=0;running=true;boss=false;
+ scoreEl.textContent=0;echoEl.textContent=3;bossBanner.style.display='none';
+}
+
+function spawnObstacle(){
+ const gap=boss?120:170;
+ const top=50+Math.random()*(c.height-220);
+ obs.push({x:c.width+50,w:boss?50:36,top,bottom:top+gap,hidden:!boss,passed:false});
+}
+function spawnOrb(){orbs.push({x:c.width+20,y:70+Math.random()*(c.height-140),r:8});}
+
+function jump(){if(running)player.vy=-9;}
+function pulse(){
+ if(!running||echoes<=0)return;
+ echoes--;echoEl.textContent=echoes;pulseTimer=75;
+ for(let i=0;i<36;i++)particles.push({x:player.x,y:player.y,r:2+Math.random()*3,a:1,v:2+Math.random()*3,t:Math.random()*Math.PI*2});
+}
+document.getElementById('jump').onclick=jump;
+document.getElementById('pulse').onclick=pulse;
+addEventListener('keydown',e=>{
+ if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();jump();}
+ if(e.key==='e'||e.key==='E')pulse();
+});
+addEventListener('pointerdown',e=>{if(e.clientY<c.height*0.7)jump();});
+
+function update(){
+ frame++;
+ if(frame%85===0)spawnObstacle();
+ if(frame%150===0)spawnOrb();
+ if(scoreVal>=25&&!boss){boss=true;bossBanner.style.display='block';}
+ if(scoreVal>=40&&boss){boss=false;bossBanner.style.display='none';}
+
+ player.vy+=0.55;player.y+=player.vy;
+ if(player.y<player.r){player.y=player.r;player.vy=0;}
+ if(player.y>c.height-player.r)gameOver();
+
+ obs.forEach(o=>o.x-=speed);
+ orbs.forEach(o=>o.x-=speed);
+ obs=obs.filter(o=>o.x+o.w>0);
+ orbs=orbs.filter(o=>o.x+o.r>0);
+
+ if(pulseTimer>0)pulseTimer--;
+ particles.forEach(p=>{p.x+=Math.cos(p.t)*p.v;p.y+=Math.sin(p.t)*p.v;p.a-=0.02;p.r+=0.08;});
+ particles=particles.filter(p=>p.a>0);
+
+ for(const o of obs){
+   if(player.x+player.r>o.x&&player.x-player.r<o.x+o.w){
+     if(player.y-player.r<o.top||player.y+player.r>o.bottom)gameOver();
+   }
+   if(!o.passed&&o.x+o.w<player.x){
+     o.passed=true;
+     scoreVal++;
+     scoreEl.textContent=scoreVal;
+     if(scoreVal%5===0){speed+=0.35;echoes=Math.min(5,echoes+1);echoEl.textContent=echoes;}
+   }
+ }
+ for(let i=orbs.length-1;i>=0;i--){
+   const o=orbs[i];
+   if(Math.hypot(player.x-o.x,player.y-o.y)<player.r+o.r){
+     scoreVal+=3;scoreEl.textContent=scoreVal;echoes=Math.min(5,echoes+1);echoEl.textContent=echoes;orbs.splice(i,1);
+   }
+ }
+}
+
+function draw(){
+ const g=ctx.createLinearGradient(0,0,0,c.height);
+ g.addColorStop(0,'#05060a');g.addColorStop(1,'#08122a');
+ ctx.fillStyle=g;ctx.fillRect(0,0,c.width,c.height);
+
+ ctx.strokeStyle='rgba(80,180,255,.08)';
+ for(let i=0;i<10;i++){ctx.beginPath();ctx.moveTo(0,(i*90+(frame%90)));ctx.lineTo(c.width,(i*90+(frame%90)));ctx.stroke();}
+ ctx.fillStyle='rgba(255,255,255,.15)';
+ for(let i=0;i<70;i++){ctx.fillRect((i*137-frame*0.8)%c.width,(i*61)%c.height,2,2);}
+
+ if(pulseTimer>0){
+   ctx.beginPath();ctx.strokeStyle='rgba(126,249,255,.35)';ctx.lineWidth=4;
+   ctx.arc(player.x,player.y,150-pulseTimer,0,Math.PI*2);ctx.stroke();
+ }
+
+ obs.forEach(o=>{
+   const vis=pulseTimer>0||!o.hidden;
+   ctx.fillStyle=boss?'#7a1f38':(vis?'#27406b':'rgba(39,64,107,.12)');
+   ctx.fillRect(o.x,0,o.w,o.top);
+   ctx.fillRect(o.x,o.bottom,o.w,c.height-o.bottom);
+ });
+
+ ctx.fillStyle='#9bffb0';
+ orbs.forEach(o=>{ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();});
+
+ particles.forEach(p=>{ctx.beginPath();ctx.fillStyle='rgba(126,249,255,'+p.a+')';ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();});
+
+ ctx.shadowColor=skins[skin];ctx.shadowBlur=24;
+ ctx.beginPath();ctx.fillStyle=skins[skin];ctx.arc(player.x,player.y,player.r,0,Math.PI*2);ctx.fill();
+ ctx.shadowBlur=0;
+}
+
+function loop(){if(!running)return;update();draw();requestAnimationFrame(loop);}
+
+function gameOver(){
+ running=false;
+ if(scoreVal>best){best=scoreVal;localStorage.setItem('echo3_best',best);bestEl.textContent=best;}
+ intro.style.display='flex';
+ intro.querySelector('p').textContent='Run ended • Score '+scoreVal+' • Best '+best;
+ document.getElementById('start').textContent='Play Again';
+}
+
+document.getElementById('start').onclick=()=>{
+ reset();
+ intro.style.display='none';
+ loop();
+};
+
+draw();
+</script>
+</body>
+</html>
