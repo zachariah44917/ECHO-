@@ -1,257 +1,174 @@
-# ECHO-<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ECHO - Motion Survival</title>
+<title>ECHO</title>
 <style>
-  html, body {
-    margin: 0;
-    overflow: hidden;
-    background: #050510;
-    color: white;
-    font-family: Arial, sans-serif;
-  }
-
-  canvas {
-    display: block;
-    background: radial-gradient(circle at top, #11152a, #050510);
-  }
-
-  #ui {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    z-index: 10;
-  }
-
-  #score {
-    font-size: 24px;
-    font-weight: bold;
-  }
-
-  #status {
-    margin-top: 8px;
-    color: #7fdcff;
-  }
-
-  #video {
-    position: absolute;
-    right: 10px;
-    bottom: 10px;
-    width: 160px;
-    height: 120px;
-    border: 2px solid #3a8cff;
-    border-radius: 10px;
-    opacity: 0.9;
-  }
-
-  #overlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0,0,0,0.6);
-    z-index: 20;
-    text-align: center;
-    padding: 24px;
-  }
-
-  #startBtn {
-    margin-top: 16px;
-    padding: 12px 22px;
-    background: #3a8cff;
-    border: none;
-    color: white;
-    font-size: 18px;
-    border-radius: 10px;
-    cursor: pointer;
-  }
+html,body{margin:0;height:100%;overflow:hidden;background:#05060a;font-family:Arial,sans-serif}
+canvas{display:block}
+#overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;color:#e8f7ff;background:rgba(0,0,0,.45)}
+h1{font-size:64px;letter-spacing:8px;margin:0;color:#7ef9ff;text-shadow:0 0 20px #38d9ff}
+p{opacity:.9}
+button{margin-top:18px;padding:12px 22px;border:0;border-radius:12px;background:#38d9ff;color:#001018;font-weight:700;font-size:18px}
+#hud{position:absolute;top:16px;left:16px;color:white;font-weight:700}
 </style>
 </head>
 <body>
-
-<div id="ui">
-  <div id="score">Score: 0</div>
-  <div id="status">Waiting for camera...</div>
-</div>
-
-<div id="overlay">
-  <div>
-    <h1>ECHO</h1>
-    <p>Move your body left and right to dodge the falling echoes.</p>
-    <button id="startBtn">Start Game</button>
-  </div>
-</div>
-
-<video id="video" autoplay playsinline muted></video>
 <canvas id="game"></canvas>
-
+<div id="hud">Score: <span id="score">0</span> | Best: <span id="best">0</span></div>
+<div id="overlay">
+  <h1>ECHO</h1>
+  <p>Dodge obstacles. Collect echo orbs. Survive.</p>
+  <button id="start">Start</button>
+</div>
 <script>
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const video = document.getElementById('video');
-const scoreEl = document.getElementById('score');
-const statusEl = document.getElementById('status');
-const overlay = document.getElementById('overlay');
-const startBtn = document.getElementById('startBtn');
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
+addEventListener('resize',resize);resize();
 
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-window.addEventListener('resize', resize);
-resize();
+const scoreEl=document.getElementById('score');
+const bestEl=document.getElementById('best');
+const overlay=document.getElementById('overlay');
+const startBtn=document.getElementById('start');
 
-let player = { x: canvas.width / 2, y: canvas.height - 80, r: 18 };
-let obstacles = [];
-let score = 0;
-let speed = 4;
-let running = false;
+let best=+localStorage.getItem('echo_best')||0;
+bestEl.textContent=best;
 
-const motionCanvas = document.createElement('canvas');
-const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
-motionCanvas.width = 64;
-motionCanvas.height = 48;
+let player, obstacles, orbs, score, speed, running, frame;
 
-let previousFrame = null;
-
-async function setupCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user' }
-    });
-    video.srcObject = stream;
-    statusEl.textContent = 'Camera ready';
-  } catch (e) {
-    statusEl.textContent = 'Camera access denied';
-  }
+function reset(){
+  player={x:120,y:canvas.height/2,r:16,vy:0};
+  obstacles=[]; orbs=[]; score=0; speed=5; frame=0;
 }
 
-function detectMotion() {
-  if (video.readyState < 2) return 0;
+function spawnObstacle(){
+  const h=80+Math.random()*180;
+  const gap=170;
+  const y=Math.random()*(canvas.height-gap-h);
+  obstacles.push({x:canvas.width+40,w:34,top:y,bottom:y+gap+h});
+}
 
-  motionCtx.drawImage(video, 0, 0, motionCanvas.width, motionCanvas.height);
-  const frame = motionCtx.getImageData(0, 0, motionCanvas.width, motionCanvas.height);
+function spawnOrb(){
+  orbs.push({x:canvas.width+20,y:60+Math.random()*(canvas.height-120),r:8});
+}
 
-  if (!previousFrame) {
-    previousFrame = frame;
-    return 0;
-  }
+function update(){
+  frame++;
+  player.vy+=0.55;
+  player.y+=player.vy;
 
-  let left = 0;
-  let right = 0;
+  if(player.y<player.r){player.y=player.r;player.vy=0;}
+  if(player.y>canvas.height-player.r){gameOver();}
 
-  for (let y = 0; y < motionCanvas.height; y++) {
-    for (let x = 0; x < motionCanvas.width; x++) {
-      const i = (y * motionCanvas.width + x) * 4;
+  if(frame%90===0) spawnObstacle();
+  if(frame%140===0) spawnOrb();
 
-      const diff =
-        Math.abs(frame.data[i] - previousFrame.data[i]) +
-        Math.abs(frame.data[i + 1] - previousFrame.data[i + 1]) +
-        Math.abs(frame.data[i + 2] - previousFrame.data[i + 2]);
+  obstacles.forEach(o=>o.x-=speed);
+  orbs.forEach(o=>o.x-=speed);
 
-      if (diff > 40) {
-        if (x < motionCanvas.width / 2) left++;
-        else right++;
+  obstacles=obstacles.filter(o=>o.x+o.w>0);
+  orbs=orbs.filter(o=>o.x+o.r>0);
+
+  for(const o of obstacles){
+    if(player.x+player.r>o.x && player.x-player.r<o.x+o.w){
+      if(player.y-player.r<o.top || player.y+player.r>o.bottom){
+        gameOver();
       }
+    }
+    if(!o.passed && o.x+o.w<player.x){
+      o.passed=true;
+      score++;
+      scoreEl.textContent=score;
+      if(score%8===0) speed+=0.35;
     }
   }
 
-  previousFrame = frame;
-
-  return (right - left) / 200;
+  for(let i=orbs.length-1;i>=0;i--){
+    const o=orbs[i];
+    const dx=player.x-o.x, dy=player.y-o.y;
+    if(Math.hypot(dx,dy)<player.r+o.r){
+      score+=3;
+      scoreEl.textContent=score;
+      orbs.splice(i,1);
+    }
+  }
 }
 
-function spawnObstacle() {
-  obstacles.push({
-    x: Math.random() * canvas.width,
-    y: -20,
-    r: 14 + Math.random() * 10
+function draw(){
+  const g=ctx.createLinearGradient(0,0,0,canvas.height);
+  g.addColorStop(0,'#05060a');
+  g.addColorStop(1,'#0b1020');
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // stars
+  ctx.fillStyle='rgba(255,255,255,.18)';
+  for(let i=0;i<50;i++){
+    ctx.fillRect((i*97+frame)%canvas.width,(i*53)%canvas.height,2,2);
+  }
+
+  // player
+  ctx.beginPath();
+  ctx.fillStyle='#7ef9ff';
+  ctx.shadowColor='#38d9ff';
+  ctx.shadowBlur=18;
+  ctx.arc(player.x,player.y,player.r,0,Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur=0;
+
+  // obstacles
+  ctx.fillStyle='#1f2a44';
+  obstacles.forEach(o=>{
+    ctx.fillRect(o.x,0,o.w,o.top);
+    ctx.fillRect(o.x,o.bottom,o.w,canvas.height-o.bottom);
+  });
+
+  // orbs
+  ctx.fillStyle='#9bffb0';
+  orbs.forEach(o=>{
+    ctx.beginPath();
+    ctx.arc(o.x,o.y,o.r,0,Math.PI*2);
+    ctx.fill();
   });
 }
 
-function update() {
-  if (!running) return;
-
-  const motion = detectMotion();
-
-  player.x += motion * 25;
-  player.x = Math.max(player.r, Math.min(canvas.width - player.r, player.x));
-
-  if (Math.random() < 0.03) spawnObstacle();
-
-  for (let i = obstacles.length - 1; i >= 0; i--) {
-    const o = obstacles[i];
-    o.y += speed;
-
-    const dx = o.x - player.x;
-    const dy = o.y - player.y;
-
-    if (Math.hypot(dx, dy) < o.r + player.r) {
-      running = false;
-      overlay.style.display = 'flex';
-      overlay.querySelector('h1').textContent = 'Game Over';
-      overlay.querySelector('p').textContent =
-        'Final Score: ' + score + '. Move less sharply and anticipate the echoes.';
-      return;
-    }
-
-    if (o.y > canvas.height + 40) obstacles.splice(i, 1);
-  }
-
-  score++;
-  speed = 4 + score / 400;
-  scoreEl.textContent = 'Score: ' + score;
-}
-
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  ctx.fillStyle = '#58c7ff';
-  ctx.beginPath();
-  ctx.arc(player.x, player.y, player.r, 0, Math.PI * 2);
-  ctx.fill();
-
-  for (const o of obstacles) {
-    const glow = ctx.createRadialGradient(o.x, o.y, 2, o.x, o.y, o.r * 2);
-    glow.addColorStop(0, '#ff8ae6');
-    glow.addColorStop(1, 'rgba(255,138,230,0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, o.r * 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#ff5fd2';
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-function loop() {
+function loop(){
+  if(!running) return;
   update();
   draw();
   requestAnimationFrame(loop);
 }
 
-startBtn.onclick = async () => {
-  overlay.style.display = 'none';
-  overlay.querySelector('h1').textContent = 'ECHO';
-  overlay.querySelector('p').textContent =
-    'Move your body left and right to dodge the falling echoes.';
-  score = 0;
-  speed = 4;
-  obstacles = [];
-  player.x = canvas.width / 2;
-  previousFrame = null;
-  running = true;
+function gameOver(){
+  running=false;
+  if(score>best){
+    best=score;
+    localStorage.setItem('echo_best',best);
+    bestEl.textContent=best;
+  }
+  overlay.style.display='flex';
+  overlay.querySelector('p').textContent='Game over. Score: '+score+' • Best: '+best;
+  startBtn.textContent='Play Again';
+}
+
+function jump(){ if(running) player.vy=-9; }
+
+addEventListener('keydown',e=>{
+  if(e.code==='Space' || e.code==='ArrowUp'){ e.preventDefault(); jump(); }
+});
+addEventListener('pointerdown',jump);
+
+startBtn.onclick=()=>{
+  reset();
+  overlay.style.display='none';
+  running=true;
+  loop();
 };
 
-setupCamera();
-loop();
+reset();
+draw();
 </script>
-
 </body>
 </html>
