@@ -2,176 +2,188 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ECHO 3.0</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ECHO: The Pulse</title>
 <style>
-html,body{margin:0;height:100%;overflow:hidden;background:#03040a;font-family:Arial,sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:#05060a;font-family:Arial,sans-serif}
 canvas{display:block}
-#hud{position:absolute;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;color:#eafcff;font-weight:700;z-index:2}
-#controls{position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:space-between;padding:0 18px;z-index:2}
-.btn{width:84px;height:84px;border-radius:50%;border:2px solid rgba(126,249,255,.7);background:rgba(20,30,50,.45);color:#fff;font-weight:800}
-#intro{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:radial-gradient(circle at center,#0b1630 0%,#03040a 70%);color:white;z-index:3}
-#intro h1{font-size:72px;letter-spacing:10px;margin:0;color:#7ef9ff;text-shadow:0 0 30px #38d9ff}
-#intro p{opacity:.85;margin-top:12px}
-#menu{display:flex;gap:10px;margin-top:18px}
-.skin{padding:10px 14px;border-radius:999px;border:1px solid rgba(126,249,255,.35);cursor:pointer}
-.skin.active{background:#38d9ff;color:#031018}
-#start{margin-top:18px;padding:12px 24px;border:0;border-radius:12px;background:#38d9ff;color:#001018;font-weight:900}
-#bossBanner{position:absolute;top:70px;left:50%;transform:translateX(-50%);padding:8px 14px;border-radius:999px;background:rgba(255,80,120,.18);color:#ffd7e5;border:1px solid rgba(255,120,160,.35);display:none;z-index:2}
+#ui{position:absolute;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;color:#fff;font-weight:700}
+#overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:radial-gradient(circle,#111827,#05060a);color:white}
+h1{font-size:64px;letter-spacing:8px;color:#7ef9ff;margin:0;text-shadow:0 0 24px #38d9ff}
+button{margin-top:18px;padding:12px 22px;border:0;border-radius:12px;background:#38d9ff;color:#001018;font-weight:800}
+#hint{opacity:.8;margin-top:10px;text-align:center;max-width:320px}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="hud">
-<div>Score <span id="score">0</span></div>
-<div>Best <span id="best">0</span></div>
-<div>Echo <span id="echo">3</span></div>
-</div>
-<div id="bossBanner">BOSS WAVE</div>
-<div id="controls">
-<button class="btn" id="jump">JUMP</button>
-<button class="btn" id="pulse">ECHO</button>
-</div>
-<div id="intro">
+<div id="ui"><div>Score <span id="score">0</span></div><div>Echo <span id="echo">3</span></div></div>
+<div id="overlay">
 <h1>ECHO</h1>
-<p>Sound reveals what light cannot.</p>
-<div id="menu">
-<div class="skin active" data-skin="cyan">Cyan</div>
-<div class="skin" data-skin="violet">Violet</div>
-<div class="skin" data-skin="gold">Gold</div>
-</div>
-<button id="start">Begin Run</button>
+<div id="hint">Swipe left/right to change lanes. Tap the ECHO button to reveal hidden obstacles.</div>
+<button id="start">Start Run</button>
 </div>
 <script>
 const c=document.getElementById('game'),ctx=c.getContext('2d');
-function resize(){c.width=innerWidth;c.height=innerHeight}resize();addEventListener('resize',resize);
-const scoreEl=score=document.getElementById('score');
-const bestEl=document.getElementById('best');
-const echoEl=document.getElementById('echo');
-const intro=document.getElementById('intro');
-const bossBanner=document.getElementById('bossBanner');
-let best=+localStorage.getItem('echo3_best')||0;bestEl.textContent=best;
+function resize(){c.width=innerWidth;c.height=innerHeight;}resize();addEventListener('resize',resize);
 
-const skins={cyan:'#7ef9ff',violet:'#b388ff',gold:'#ffd166'};
-let skin='cyan';
-document.querySelectorAll('.skin').forEach(el=>{
-  el.onclick=()=>{document.querySelectorAll('.skin').forEach(s=>s.classList.remove('active'));el.classList.add('active');skin=el.dataset.skin;}
-});
-
-let player,obs,orbs,particles,scoreVal,speed,frame,echoes,pulseTimer,running,boss;
+const lanes=[-1,0,1];
+let lane=1,targetLane=1,playerY,speed,score,echoes,pulse,obstacles,orbs,frame,running;
 
 function reset(){
- player={x:120,y:c.height/2,r:16,vy:0};
- obs=[];orbs=[];particles=[];
- scoreVal=0;speed=5;frame=0;echoes=3;pulseTimer=0;running=true;boss=false;
- scoreEl.textContent=0;echoEl.textContent=3;bossBanner.style.display='none';
+ lane=1;targetLane=1;playerY=c.height-120;speed=10;score=0;echoes=3;pulse=0;frame=0;
+ obstacles=[];orbs=[];running=true;
+ document.getElementById('score').textContent=0;
+ document.getElementById('echo').textContent=echoes;
 }
 
 function spawnObstacle(){
- const gap=boss?120:170;
- const top=50+Math.random()*(c.height-220);
- obs.push({x:c.width+50,w:boss?50:36,top,bottom:top+gap,hidden:!boss,passed:false});
+ const l=Math.floor(Math.random()*3);
+ obstacles.push({lane:l,z:1,hidden:Math.random()<0.8});
 }
-function spawnOrb(){orbs.push({x:c.width+20,y:70+Math.random()*(c.height-140),r:8});}
+function spawnOrb(){
+ const l=Math.floor(Math.random()*3);
+ orbs.push({lane:l,z:1});
+}
 
-function jump(){if(running)player.vy=-9;}
-function pulse(){
- if(!running||echoes<=0)return;
- echoes--;echoEl.textContent=echoes;pulseTimer=75;
- for(let i=0;i<36;i++)particles.push({x:player.x,y:player.y,r:2+Math.random()*3,a:1,v:2+Math.random()*3,t:Math.random()*Math.PI*2});
+function laneX(i){
+ const center=c.width/2;
+ return center + lanes[i]*120;
 }
-document.getElementById('jump').onclick=jump;
-document.getElementById('pulse').onclick=pulse;
-addEventListener('keydown',e=>{
- if(e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();jump();}
- if(e.key==='e'||e.key==='E')pulse();
-});
-addEventListener('pointerdown',e=>{if(e.clientY<c.height*0.7)jump();});
 
 function update(){
  frame++;
- if(frame%85===0)spawnObstacle();
- if(frame%150===0)spawnOrb();
- if(scoreVal>=25&&!boss){boss=true;bossBanner.style.display='block';}
- if(scoreVal>=40&&boss){boss=false;bossBanner.style.display='none';}
+ if(frame%40===0)spawnObstacle();
+ if(frame%110===0)spawnOrb();
+ if(frame%180===0)speed+=0.4;
 
- player.vy+=0.55;player.y+=player.vy;
- if(player.y<player.r){player.y=player.r;player.vy=0;}
- if(player.y>c.height-player.r)gameOver();
+ lane += (targetLane-lane)*0.18;
+ if(pulse>0)pulse--;
 
- obs.forEach(o=>o.x-=speed);
- orbs.forEach(o=>o.x-=speed);
- obs=obs.filter(o=>o.x+o.w>0);
- orbs=orbs.filter(o=>o.x+o.r>0);
+ obstacles.forEach(o=>o.z-=0.03*speed/10);
+ orbs.forEach(o=>o.z-=0.03*speed/10);
 
- if(pulseTimer>0)pulseTimer--;
- particles.forEach(p=>{p.x+=Math.cos(p.t)*p.v;p.y+=Math.sin(p.t)*p.v;p.a-=0.02;p.r+=0.08;});
- particles=particles.filter(p=>p.a>0);
+ obstacles=obstacles.filter(o=>o.z>-0.1);
+ orbs=orbs.filter(o=>o.z>-0.1);
 
- for(const o of obs){
-   if(player.x+player.r>o.x&&player.x-player.r<o.x+o.w){
-     if(player.y-player.r<o.top||player.y+player.r>o.bottom)gameOver();
+ for(const o of obstacles){
+   if(o.z<0.12 && Math.round(lane)===o.lane){
+     running=false;
+     document.getElementById('overlay').style.display='flex';
+     document.getElementById('hint').textContent='Run over. Score: '+score;
+     document.getElementById('start').textContent='Play Again';
    }
-   if(!o.passed&&o.x+o.w<player.x){
+   if(!o.passed && o.z<0){
      o.passed=true;
-     scoreVal++;
-     scoreEl.textContent=scoreVal;
-     if(scoreVal%5===0){speed+=0.35;echoes=Math.min(5,echoes+1);echoEl.textContent=echoes;}
+     score++;
+     document.getElementById('score').textContent=score;
    }
  }
+
  for(let i=orbs.length-1;i>=0;i--){
    const o=orbs[i];
-   if(Math.hypot(player.x-o.x,player.y-o.y)<player.r+o.r){
-     scoreVal+=3;scoreEl.textContent=scoreVal;echoes=Math.min(5,echoes+1);echoEl.textContent=echoes;orbs.splice(i,1);
+   if(o.z<0.12 && Math.round(lane)===o.lane){
+     echoes=Math.min(5,echoes+1);
+     document.getElementById('echo').textContent=echoes;
+     orbs.splice(i,1);
    }
+ }
+}
+
+function drawRoad(){
+ ctx.fillStyle='#070b16';
+ ctx.fillRect(0,0,c.width,c.height);
+ const cx=c.width/2;
+ ctx.strokeStyle='rgba(80,180,255,.15)';
+ ctx.lineWidth=2;
+ for(let i=0;i<20;i++){
+   const y=c.height-i*50-(frame*2%50);
+   ctx.beginPath();
+   ctx.moveTo(cx-180+i*2,y);
+   ctx.lineTo(cx+180-i*2,y);
+   ctx.stroke();
+ }
+ for(let l=-1;l<=1;l++){
+   ctx.beginPath();
+   ctx.moveTo(cx+l*120,0);
+   ctx.lineTo(cx+l*40,c.height);
+   ctx.stroke();
  }
 }
 
 function draw(){
- const g=ctx.createLinearGradient(0,0,0,c.height);
- g.addColorStop(0,'#05060a');g.addColorStop(1,'#08122a');
- ctx.fillStyle=g;ctx.fillRect(0,0,c.width,c.height);
+ drawRoad();
 
- ctx.strokeStyle='rgba(80,180,255,.08)';
- for(let i=0;i<10;i++){ctx.beginPath();ctx.moveTo(0,(i*90+(frame%90)));ctx.lineTo(c.width,(i*90+(frame%90)));ctx.stroke();}
- ctx.fillStyle='rgba(255,255,255,.15)';
- for(let i=0;i<70;i++){ctx.fillRect((i*137-frame*0.8)%c.width,(i*61)%c.height,2,2);}
-
- if(pulseTimer>0){
-   ctx.beginPath();ctx.strokeStyle='rgba(126,249,255,.35)';ctx.lineWidth=4;
-   ctx.arc(player.x,player.y,150-pulseTimer,0,Math.PI*2);ctx.stroke();
+ if(pulse>0){
+   ctx.beginPath();
+   ctx.strokeStyle='rgba(126,249,255,.25)';
+   ctx.lineWidth=6;
+   ctx.arc(laneX(Math.round(lane)),playerY,220-pulse*2,0,Math.PI*2);
+   ctx.stroke();
  }
 
- obs.forEach(o=>{
-   const vis=pulseTimer>0||!o.hidden;
-   ctx.fillStyle=boss?'#7a1f38':(vis?'#27406b':'rgba(39,64,107,.12)');
-   ctx.fillRect(o.x,0,o.w,o.top);
-   ctx.fillRect(o.x,o.bottom,o.w,c.height-o.bottom);
+ obstacles.forEach(o=>{
+   const x=laneX(o.lane);
+   const y=playerY-(1-o.z)*650;
+   const size=30+120*(1-o.z);
+   ctx.fillStyle=(pulse>0||!o.hidden)?'#ff5d7a':'rgba(255,93,122,.12)';
+   ctx.fillRect(x-size/2,y-size,size,size);
  });
 
- ctx.fillStyle='#9bffb0';
- orbs.forEach(o=>{ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();});
+ orbs.forEach(o=>{
+   const x=laneX(o.lane);
+   const y=playerY-(1-o.z)*650;
+   const r=8+18*(1-o.z);
+   ctx.beginPath();
+   ctx.fillStyle='#9bffb0';
+   ctx.arc(x,y,r,0,Math.PI*2);
+   ctx.fill();
+ });
 
- particles.forEach(p=>{ctx.beginPath();ctx.fillStyle='rgba(126,249,255,'+p.a+')';ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();});
-
- ctx.shadowColor=skins[skin];ctx.shadowBlur=24;
- ctx.beginPath();ctx.fillStyle=skins[skin];ctx.arc(player.x,player.y,player.r,0,Math.PI*2);ctx.fill();
+ ctx.shadowColor='#38d9ff';
+ ctx.shadowBlur=24;
+ ctx.beginPath();
+ ctx.fillStyle='#7ef9ff';
+ ctx.arc(laneX(Math.round(lane)),playerY,18,0,Math.PI*2);
+ ctx.fill();
  ctx.shadowBlur=0;
 }
 
-function loop(){if(!running)return;update();draw();requestAnimationFrame(loop);}
-
-function gameOver(){
- running=false;
- if(scoreVal>best){best=scoreVal;localStorage.setItem('echo3_best',best);bestEl.textContent=best;}
- intro.style.display='flex';
- intro.querySelector('p').textContent='Run ended • Score '+scoreVal+' • Best '+best;
- document.getElementById('start').textContent='Play Again';
+function loop(){
+ if(!running)return;
+ update();
+ draw();
+ requestAnimationFrame(loop);
 }
+
+let touchStartX=0;
+addEventListener('touchstart',e=>touchStartX=e.touches[0].clientX);
+addEventListener('touchend',e=>{
+ const dx=e.changedTouches[0].clientX-touchStartX;
+ if(Math.abs(dx)>40){
+   if(dx>0)targetLane=Math.min(2,targetLane+1);
+   else targetLane=Math.max(0,targetLane-1);
+ }else{
+   if(echoes>0){
+     echoes--;
+     document.getElementById('echo').textContent=echoes;
+     pulse=80;
+   }
+ }
+});
+
+addEventListener('keydown',e=>{
+ if(e.key==='ArrowLeft')targetLane=Math.max(0,targetLane-1);
+ if(e.key==='ArrowRight')targetLane=Math.min(2,targetLane+1);
+ if((e.key==='e'||e.key==='E')&&echoes>0){
+   echoes--;
+   document.getElementById('echo').textContent=echoes;
+   pulse=80;
+ }
+});
 
 document.getElementById('start').onclick=()=>{
  reset();
- intro.style.display='none';
+ document.getElementById('overlay').style.display='none';
  loop();
 };
 
